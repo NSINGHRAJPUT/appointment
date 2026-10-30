@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Loader2, MessageCircle, Phone, Check, X, Star } from 'lucide-react';
+import { videoCallEnabled } from '@/lib/features';
 import { getStoredToken } from '@/hooks/use-auth';
 import { appointmentService } from '@/services/appointment.service';
 import { apiFetch, waLink } from '@/lib/api';
+import { ConfirmDialog } from '@/components/ui/confirm-dialog';
 
 type Appointment = {
   id: string;
@@ -31,9 +33,9 @@ type Appointment = {
 };
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  REQUESTED: { label: 'Awaiting Approval', cls: 'bg-amber-50 text-amber-700 border-amber-200' },
+  REQUESTED: { label: 'Awaiting Approval', cls: 'bg-secondary-container/50 text-secondary border-secondary/20' },
   CONFIRMED: { label: 'Confirmed', cls: 'bg-primary/10 text-primary border-primary/20' },
-  COMPLETED: { label: 'Completed', cls: 'bg-slate-100 text-slate-600 border-slate-200' },
+  COMPLETED: { label: 'Completed', cls: 'bg-surface-container-high text-on-surface-variant border-outline-variant' },
   CANCELLED: { label: 'Cancelled', cls: 'bg-error/10 text-error border-error/20' },
 };
 
@@ -44,6 +46,8 @@ export default function AppointmentDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelDialogMode, setCancelDialogMode] = useState<'cancel' | 'reject'>('cancel');
   const [approving, setApproving] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [userRole, setUserRole] = useState<'PATIENT' | 'DOCTOR' | 'ADMIN' | null>(null);
@@ -62,33 +66,15 @@ export default function AppointmentDetailPage() {
       authService.me(token).then((me: any) => setUserRole(me.role)).catch(console.error);
     });
 
-    // We fetch from myAppointments for PATIENT/DOCTOR, and from adminService.allAppointments for ADMIN
-    // But since we don't know the role immediately, we can try myAppointments first.
-    // If we are admin, we can fetch allAppointments instead. 
-    import('@/services/auth.service').then(({ authService }) => {
-      authService.me(token).then((me: any) => {
-        setUserRole(me.role);
-        if (me.role === 'ADMIN') {
-          import('@/services/admin.service').then(({ adminService }) => {
-            adminService.allAppointments(token, 1, 100).then((data: any) => {
-              const list: Appointment[] = data.items ?? [];
-              const found = list.find(a => a.id === id) ?? null;
-              if (!found) setError('Appointment not found');
-              setAppt(found);
-            }).catch(e => setError((e as Error).message)).finally(() => setLoading(false));
-          });
-        } else {
-          appointmentService.myAppointments(token)
-            .then((data: any) => {
-              const list: Appointment[] = Array.isArray(data) ? data : [];
-              const found = list.find(a => a.id === id) ?? null;
-              if (!found) setError('Appointment not found');
-              setAppt(found);
-            })
-            .catch(e => setError((e as Error).message))
-            .finally(() => setLoading(false));
-        }
-      });
+    // Fetch appointment by ID directly - most efficient approach
+    import('@/services/appointment.service').then(({ appointmentService }) => {
+      appointmentService.getById(token, id)
+        .then((data: any) => {
+          setAppt(data);
+          if (!data) setError('Appointment not found');
+        })
+        .catch(e => setError((e as Error).message))
+        .finally(() => setLoading(false));
     });
   }, [id, router]);
 
@@ -99,8 +85,14 @@ export default function AppointmentDetailPage() {
     try {
       await appointmentService.updateStatus(token, appt.id, 'CANCELLED');
       setAppt(prev => prev ? { ...prev, status: 'CANCELLED' } : prev);
+      setCancelDialogOpen(false);
     } catch (e) { setError((e as Error).message); }
     finally { setCancelling(false); }
+  }
+
+  function openCancelDialog(mode: 'cancel' | 'reject') {
+    setCancelDialogMode(mode);
+    setCancelDialogOpen(true);
   }
 
   async function handleApprove() {
@@ -155,11 +147,15 @@ export default function AppointmentDetailPage() {
   const statusInfo = STATUS_LABEL[appt.status] || { label: appt.status, cls: 'bg-surface text-on-surface' };
   const waUrl = appt.doctor?.user.whatsappNumber ? waLink(appt.doctor.user.whatsappNumber) : (appt.patient?.user.whatsappNumber ? waLink(appt.patient.user.whatsappNumber) : null);
   const canCancel = ['REQUESTED', 'CONFIRMED'].includes(appt.status);
-  const canChat = appt.conversation?.id && ['CONFIRMED', 'COMPLETED'].includes(appt.status);
-  const canCall = appt.status === 'CONFIRMED';
+  const canChat = ['CONFIRMED', 'COMPLETED'].includes(appt.status);
+  const canCall = appt.status === 'CONFIRMED' && videoCallEnabled;
   const canReview = appt.status === 'COMPLETED' && !reviewDone && userRole === 'PATIENT';
   const canApprove = appt.status === 'REQUESTED' && (userRole === 'DOCTOR' || userRole === 'ADMIN');
   const canComplete = appt.status === 'CONFIRMED' && (userRole === 'DOCTOR' || userRole === 'ADMIN');
+  const chatHref = appt.conversation?.id
+    ? `/chat?conversationId=${appt.conversation.id}`
+    : `/chat?appointmentId=${appt.id}`;
+
   return (
     <main className="max-w-2xl mx-auto px-4 py-10 space-y-6">
       <div className="flex items-center justify-between">
@@ -173,23 +169,14 @@ export default function AppointmentDetailPage() {
       {appt.doctor && (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 space-y-4 mb-4">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-bold text-lg border border-primary/20">
+            <div className="w-14 h-14 rounded-2xl bg-primary-container text-primary flex items-center justify-center font-bold text-lg">
               {appt.doctor.user.fullName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
             </div>
             <div>
-              <h1 className="font-bold text-lg text-on-surface">Dr. {appt.doctor.user.fullName}</h1>
+              <h1 className="font-display font-bold text-lg text-on-surface">Dr. {appt.doctor.user.fullName}</h1>
               <p className="text-sm text-on-surface-variant">{appt.doctor.specialization ?? 'General Practice'}</p>
             </div>
           </div>
-          
-          {/* <div className="grid grid-cols-2 gap-4 text-sm mt-4">
-            <div>
-              <p className="text-xs text-on-surface-variant uppercase tracking-wider mb-1">Fee</p>
-              <p className="font-medium text-on-surface">
-                {appt.doctor.priceCents === 0 ? 'Free' : `₹${(appt.doctor.priceCents / 100).toFixed(0)}`}
-              </p>
-            </div>
-          </div> */}
         </div>
       )}
 
@@ -197,11 +184,11 @@ export default function AppointmentDetailPage() {
       {(userRole === 'DOCTOR' || userRole === 'ADMIN') && (
         <div className="bg-surface-container-lowest border border-outline-variant rounded-2xl p-6 space-y-4">
           <div className="flex items-center gap-4">
-            <div className="w-14 h-14 rounded-xl bg-secondary-container/30 text-secondary flex items-center justify-center font-bold text-lg border border-secondary/20">
+            <div className="w-14 h-14 rounded-2xl bg-secondary-container/40 text-secondary flex items-center justify-center font-bold text-lg">
               {appt.patientName.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
             </div>
             <div>
-              <h1 className="font-bold text-lg text-on-surface">Patient: {appt.patientName}</h1>
+              <h1 className="font-display font-bold text-lg text-on-surface">Patient: {appt.patientName}</h1>
               <p className="text-sm text-on-surface-variant">{appt.patientPhone} {appt.patientEmail ? `• ${appt.patientEmail}` : ''}</p>
             </div>
           </div>
@@ -233,22 +220,22 @@ export default function AppointmentDetailPage() {
 
         {/* Status-specific message */}
         {appt.status === 'REQUESTED' && userRole === 'PATIENT' && (
-          <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
-            Waiting for doctor to approve your appointment.
+          <div className="rounded-2xl bg-secondary-container/40 border border-secondary/20 px-4 py-3 text-sm text-secondary">
+            Waiting for your vet to approve this appointment.
           </div>
         )}
         {appt.status === 'REQUESTED' && (userRole === 'DOCTOR' || userRole === 'ADMIN') && (
-          <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-sm text-amber-700">
+          <div className="rounded-2xl bg-secondary-container/40 border border-secondary/20 px-4 py-3 text-sm text-secondary">
             This appointment is awaiting your approval. Approve or reject below.
           </div>
         )}
         {appt.status === 'CONFIRMED' && userRole === 'PATIENT' && (
-          <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary">
+          <div className="rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary">
             Your appointment is confirmed. You can join the call or chat below.
           </div>
         )}
         {appt.status === 'CONFIRMED' && (userRole === 'DOCTOR' || userRole === 'ADMIN') && (
-          <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary">
+          <div className="rounded-2xl bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary">
             This appointment is confirmed. You can start the call or mark it as completed.
           </div>
         )}
@@ -262,12 +249,12 @@ export default function AppointmentDetailPage() {
           {error && <p className="text-sm text-error">{error}</p>}
           <div className="flex gap-3">
             <button onClick={handleApprove} disabled={approving || cancelling}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50">
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50">
               {approving ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
               Approve Appointment
             </button>
-            <button onClick={handleCancel} disabled={approving || cancelling}
-              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl border border-error/30 text-error text-sm font-semibold hover:bg-error/5 transition-all disabled:opacity-50">
+            <button onClick={() => openCancelDialog('reject')} disabled={approving || cancelling}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-full border border-error/30 text-error text-sm font-semibold hover:bg-error/5 transition-all disabled:opacity-50">
               {cancelling ? <Loader2 size={16} className="animate-spin" /> : <X size={16} />}
               Reject
             </button>
@@ -278,34 +265,34 @@ export default function AppointmentDetailPage() {
       {/* Actions */}
       <div className="grid grid-cols-2 gap-3">
         {canChat && (
-          <a href={`/chat`}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all">
+          <a href={chatHref}
+            className="flex items-center justify-center gap-2 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all">
             <MessageCircle size={16} /> Open Chat
           </a>
         )}
         {canCall && (
-          <a href="/call"
-            className="flex items-center justify-center gap-2 py-3 rounded-xl border border-primary text-primary text-sm font-semibold hover:bg-primary/5 transition-all">
+          <a href={`/call?appointmentId=${appt.id}`}
+            className="flex items-center justify-center gap-2 py-3 rounded-full border border-primary text-primary text-sm font-semibold hover:bg-primary/5 transition-all">
             <Phone size={16} /> Join Call
           </a>
         )}
         {canComplete && (
           <button onClick={handleComplete} disabled={completing}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50">
+            className="flex items-center justify-center gap-2 py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-50">
             {completing ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             Mark Completed
           </button>
         )}
         {waUrl && (
           <a href={waUrl} target="_blank" rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 py-3 rounded-xl bg-[#25D366]/10 border border-[#25D366]/30 text-[#075E54] text-sm font-medium hover:bg-[#25D366]/20 transition-all">
-            <span className="material-symbols-outlined text-[#25D366] text-[16px]">forum</span>
+            className="flex items-center justify-center gap-2 py-3 rounded-full bg-primary-container border border-primary/20 text-primary text-sm font-medium hover:bg-primary/10 transition-all">
+            <MessageCircle size={16} />
             WhatsApp
           </a>
         )}
         {canCancel && !canApprove && (
-          <button onClick={handleCancel} disabled={cancelling}
-            className="flex items-center justify-center gap-2 py-3 rounded-xl border border-error/30 text-error text-sm font-medium hover:bg-error/5 transition-all disabled:opacity-50">
+          <button onClick={() => openCancelDialog('cancel')} disabled={cancelling}
+            className="flex items-center justify-center gap-2 py-3 rounded-full border border-error/30 text-error text-sm font-medium hover:bg-error/5 transition-all disabled:opacity-50">
             {cancelling ? <Loader2 size={14} className="animate-spin" /> : <X size={14} />}
             Cancel
           </button>
@@ -328,7 +315,7 @@ export default function AppointmentDetailPage() {
             className="w-full px-3 py-2.5 rounded-xl border border-outline-variant text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none" />
           {error && <p className="text-sm text-error">{error}</p>}
           <button onClick={handleReview} disabled={rating === 0 || submittingReview}
-            className="w-full py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
+            className="w-full py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
             {submittingReview ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
             Submit Review
           </button>
@@ -336,10 +323,24 @@ export default function AppointmentDetailPage() {
       )}
 
       {reviewDone && (
-        <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary flex items-center gap-2">
+        <div className="rounded-full bg-primary/5 border border-primary/20 px-4 py-3 text-sm text-primary flex items-center gap-2">
           <Check size={16} /> Review submitted. Thank you!
         </div>
       )}
+
+      <ConfirmDialog
+        open={cancelDialogOpen}
+        title={cancelDialogMode === 'reject' ? 'Reject appointment?' : 'Cancel appointment?'}
+        description={
+          cancelDialogMode === 'reject'
+            ? 'This will decline the appointment request. The patient will be notified that their booking was not accepted.'
+            : 'Are you sure you want to cancel this appointment? This action cannot be undone.'
+        }
+        confirmLabel={cancelDialogMode === 'reject' ? 'Reject appointment' : 'Yes, cancel'}
+        loading={cancelling}
+        onConfirm={handleCancel}
+        onCancel={() => setCancelDialogOpen(false)}
+      />
     </main>
   );
 }

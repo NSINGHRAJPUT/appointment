@@ -1,9 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import io, { Socket } from "socket.io-client";
+import {
+  Mic,
+  MicOff,
+  PhoneOff,
+  Video,
+  VideoOff,
+} from "lucide-react";
 import { appointmentService } from "@/services/appointment.service";
+import { authService } from "@/services/auth.service";
 import { callService } from "@/services/call.service";
+import { getStoredToken } from "@/hooks/use-auth";
+import { env } from "@/lib/env";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,11 +32,30 @@ type MyAppointment = {
 type SignalPayload =
   | { type: "offer"; sdp: RTCSessionDescriptionInit }
   | { type: "answer"; sdp: RTCSessionDescriptionInit }
-  | { type: "candidate"; candidate: RTCIceCandidateInit }
-  | unknown;
+  | { type: "candidate"; candidate: RTCIceCandidateInit };
+
+type UserRole = "PATIENT" | "DOCTOR" | "ADMIN";
 
 export default function CallPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="mx-auto max-w-6xl p-6">
+          <p className="text-sm text-on-surface-variant">Loading call…</p>
+        </main>
+      }
+    >
+      <CallPageInner />
+    </Suspense>
+  );
+}
+
+function CallPageInner() {
+  const searchParams = useSearchParams();
+  const appointmentFromUrl = searchParams.get("appointmentId");
+
   const [token, setToken] = useState<string | null>(null);
+  const [role, setRole] = useState<UserRole | null>(null);
   const [appointments, setAppointments] = useState<MyAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -37,223 +67,375 @@ export default function CallPage() {
 
   const [selectedAppointmentId, setSelectedAppointmentId] = useState<
     string | null
-  >(null);
-  const [mode, setMode] = useState<"caller" | "receiver">("caller");
+  >(appointmentFromUrl);
   const [callStatus, setCallStatus] = useState<string>(
     "Select a confirmed appointment",
   );
   const [callError, setCallError] = useState<string | null>(null);
   const [calling, setCalling] = useState(false);
+  const [inCall, setInCall] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [remotePresent, setRemotePresent] = useState(false);
 
   const socketRef = useRef<Socket | null>(null);
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const makingOfferRef = useRef(false);
+  const roleRef = useRef<UserRole | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
 
-  const localAudioRef = useRef<HTMLAudioElement | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
 
   useEffect(() => {
-    setToken(window.localStorage.getItem("token"));
+    roleRef.current = role;
+  }, [role]);
+
+  useEffect(() => {
+    selectedIdRef.current = selectedAppointmentId;
+  }, [selectedAppointmentId]);
+
+  useEffect(() => {
+    setToken(getStoredToken());
   }, []);
+
+  useEffect(() => {
+    if (appointmentFromUrl) {
+      setSelectedAppointmentId(appointmentFromUrl);
+    }
+  }, [appointmentFromUrl]);
 
   useEffect(() => {
     if (!token) return;
     setLoading(true);
     setError(null);
-    appointmentService
-      .myAppointments(token)
-      .then((data) => setAppointments(data as MyAppointment[]))
+    Promise.all([
+      appointmentService.myAppointments(token),
+      authService.me(token),
+    ])
+      .then(([data, me]) => {
+        setAppointments(data as MyAppointment[]);
+        const r = (me as { role?: UserRole }).role ?? null;
+        setRole(r);
+      })
       .catch((err) => setError((err as Error).message))
       .finally(() => setLoading(false));
   }, [token]);
 
+  function cleanupMedia() {
+    pcRef.current?.close();
+    pcRef.current = null;
+    localStreamRef.current?.getTracks().forEach((t) => t.stop());
+    localStreamRef.current = null;
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    pendingCandidatesRef.current = [];
+    makingOfferRef.current = false;
+  }
+
+  function disconnectSocket() {
+    socketRef.current?.disconnect();
+    socketRef.current = null;
+  }
+
   useEffect(() => {
     return () => {
-      socketRef.current?.disconnect();
-      socketRef.current = null;
-      pcRef.current?.close();
-      pcRef.current = null;
-      localStreamRef.current?.getTracks().forEach((t) => t.stop());
-      localStreamRef.current = null;
-      remoteStreamRef.current = null;
+      const roomId = selectedIdRef.current;
+      if (socketRef.current && roomId) {
+        socketRef.current.emit("call:hangup", { roomId });
+      }
+      disconnectSocket();
+      cleanupMedia();
     };
   }, []);
 
+  async function flushPendingCandidates(pc: RTCPeerConnection) {
+    for (const cand of pendingCandidatesRef.current.splice(0)) {
+      try {
+        await pc.addIceCandidate(cand);
+      } catch {
+        // ignore until remote description is ready
+      }
+    }
+  }
+
+  async function createAndSendOffer(socket: Socket, roomId: string) {
+    const pc = pcRef.current;
+    if (!pc || makingOfferRef.current) return;
+    makingOfferRef.current = true;
+    try {
+      setCallStatus("Creating offer...");
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      socket.emit("call:signal", {
+        roomId,
+        payload: { type: "offer", sdp: pc.localDescription },
+      });
+      setCallStatus("Waiting for answer...");
+    } finally {
+      makingOfferRef.current = false;
+    }
+  }
+
+  async function handleSignal(
+    socket: Socket,
+    roomId: string,
+    payload: SignalPayload,
+    isOfferer: boolean,
+  ) {
+    const pc = pcRef.current;
+    const type = payload?.type;
+
+    if (type === "candidate" && !pc) {
+      if ("candidate" in payload && payload.candidate) {
+        pendingCandidatesRef.current.push(payload.candidate);
+      }
+      return;
+    }
+    if (!pc) return;
+
+    if (type === "offer" && !isOfferer) {
+      await pc.setRemoteDescription(payload.sdp);
+      await flushPendingCandidates(pc);
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      socket.emit("call:signal", {
+        roomId,
+        payload: { type: "answer", sdp: pc.localDescription },
+      });
+      setCallStatus("In call");
+      setInCall(true);
+    } else if (type === "answer" && isOfferer) {
+      await pc.setRemoteDescription(payload.sdp);
+      await flushPendingCandidates(pc);
+      setCallStatus("In call");
+      setInCall(true);
+    } else if (type === "candidate") {
+      if (!("candidate" in payload) || !payload.candidate) return;
+      if (pc.remoteDescription) {
+        await pc.addIceCandidate(payload.candidate);
+      } else {
+        pendingCandidatesRef.current.push(payload.candidate);
+      }
+    }
+  }
+
   async function startCall() {
-    if (!token || !selectedAppointmentId) return;
+    if (!token || !selectedAppointmentId || !role) return;
+    if (role !== "DOCTOR" && role !== "PATIENT") {
+      setCallError("Only doctor or patient can join the call");
+      return;
+    }
+
     setCalling(true);
     setCallError(null);
     setCallStatus("Initializing...");
+    setRemotePresent(false);
+
+    const isOfferer = role === "DOCTOR";
+    const roomId = selectedAppointmentId;
 
     try {
-      await callService.start(token, selectedAppointmentId);
-      setCallStatus("Starting realtime signaling...");
+      cleanupMedia();
+      disconnectSocket();
 
-      const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000';
-      const socket = io(`${WS_URL}/call`, {
+      await callService.start(token, roomId, "VIDEO");
+      setCallStatus("Fetching ICE servers...");
+      const { iceServers } = await callService.getIceServers(token, roomId);
+
+      setCallStatus("Connecting signaling...");
+      const socket = io(`${env.wsUrl}/call`, {
         auth: { token },
-        transports: ['websocket'],
+        transports: ["websocket"],
       });
       socketRef.current = socket;
 
       socket.on("disconnect", () => {
         setCallStatus("Disconnected");
+        setInCall(false);
       });
 
-      socket.on("call:signal", async (payload: any) => {
+      socket.on("call:signal", async (payload: SignalPayload) => {
         try {
-          const type = payload?.type;
-          if (type === "candidate" && !pcRef.current) {
-            if (payload.candidate)
-              pendingCandidatesRef.current.push(
-                payload.candidate as RTCIceCandidateInit,
-              );
-            return;
-          }
-          if (!pcRef.current) return;
-          if (type === "offer" && mode === "receiver") {
-            await pcRef.current.setRemoteDescription(
-              payload.sdp as RTCSessionDescriptionInit,
-            );
-            for (const cand of pendingCandidatesRef.current.splice(0)) {
-              try {
-                await pcRef.current.addIceCandidate(cand);
-              } catch {
-                // If remote description isn't ready, we'll keep waiting for the next update.
-              }
-            }
-            const answer = await pcRef.current.createAnswer();
-            await pcRef.current.setLocalDescription(answer);
-            socket.emit("call:signal", {
-              roomId: selectedAppointmentId,
-              payload: { type: "answer", sdp: pcRef.current.localDescription },
-            });
-          } else if (type === "answer" && mode === "caller") {
-            await pcRef.current.setRemoteDescription(
-              payload.sdp as RTCSessionDescriptionInit,
-            );
-            for (const cand of pendingCandidatesRef.current.splice(0)) {
-              try {
-                await pcRef.current.addIceCandidate(cand);
-              } catch {
-                // ignore until next remote description update
-              }
-            }
-          } else if (type === "candidate") {
-            if (!payload.candidate) return;
-            const pc = pcRef.current;
-            if (pc.remoteDescription) {
-              await pc.addIceCandidate(
-                payload.candidate as RTCIceCandidateInit,
-              );
-            } else {
-              pendingCandidatesRef.current.push(
-                payload.candidate as RTCIceCandidateInit,
-              );
-            }
-          }
+          await handleSignal(socket, roomId, payload, isOfferer);
         } catch (e) {
           setCallError((e as Error).message);
         }
       });
 
-      await new Promise<void>((resolve) => {
-        socket.once("connect", () => resolve());
+      socket.on("peer:joined", async () => {
+        setRemotePresent(true);
+        setCallStatus("Peer joined");
+        if (isOfferer) {
+          try {
+            await createAndSendOffer(socket, roomId);
+          } catch (e) {
+            setCallError((e as Error).message);
+          }
+        } else {
+          setCallStatus("Waiting for offer...");
+        }
       });
 
-      socket.emit("call:join", { roomId: selectedAppointmentId });
+      socket.on("call:hangup", () => {
+        setCallStatus("Peer left the call");
+        setRemotePresent(false);
+        setInCall(false);
+        cleanupMedia();
+      });
 
-      const rtcConfig: RTCConfiguration = {
-        iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-      };
-      const pc = new RTCPeerConnection(rtcConfig);
+      await new Promise<void>((resolve, reject) => {
+        socket.once("connect", () => resolve());
+        socket.once("connect_error", (err) => reject(err));
+      });
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+        audio: true,
+      });
+      localStreamRef.current = stream;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+      setMicOn(true);
+      setCamOn(true);
+
+      const pc = new RTCPeerConnection({
+        iceServers: iceServers as RTCIceServer[],
+      });
       pcRef.current = pc;
 
+      for (const track of stream.getTracks()) {
+        pc.addTrack(track, stream);
+      }
+
       pc.ontrack = (ev) => {
-        const [stream] = ev.streams;
-        if (stream) {
-          remoteStreamRef.current = stream;
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = stream;
-          }
+        const [remoteStream] = ev.streams;
+        if (remoteStream && remoteVideoRef.current) {
+          remoteVideoRef.current.srcObject = remoteStream;
         }
+        setRemotePresent(true);
+        setInCall(true);
+        setCallStatus("In call");
       };
 
       pc.onicecandidate = (ev) => {
-        if (!ev.candidate || !selectedAppointmentId) return;
+        if (!ev.candidate) return;
         socket.emit("call:signal", {
-          roomId: selectedAppointmentId,
+          roomId,
           payload: { type: "candidate", candidate: ev.candidate.toJSON() },
         });
       };
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      localStreamRef.current = stream;
-      if (localAudioRef.current) {
-        localAudioRef.current.srcObject = stream;
-      }
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === "connected") {
+          setCallStatus("In call");
+          setInCall(true);
+        } else if (
+          pc.connectionState === "failed" ||
+          pc.connectionState === "disconnected"
+        ) {
+          setCallStatus(`Connection ${pc.connectionState}`);
+        }
+      };
 
-      for (const track of stream.getTracks()) pc.addTrack(track, stream);
-
-      setCallStatus("Ready");
-
-      if (mode === "caller") {
-        setCallStatus("Creating offer...");
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit("call:signal", {
-          roomId: selectedAppointmentId,
-          payload: { type: "offer", sdp: pc.localDescription },
-        });
-        setCallStatus("Waiting for answer...");
-      } else {
-        setCallStatus("Waiting for offer...");
-      }
+      socket.emit("call:join", { roomId });
+      setCallStatus(
+        isOfferer ? "Waiting for patient..." : "Waiting for doctor...",
+      );
+      setInCall(true);
     } catch (e) {
       setCallError((e as Error).message);
       setCallStatus("Failed");
+      cleanupMedia();
+      disconnectSocket();
+      setInCall(false);
     } finally {
       setCalling(false);
     }
   }
 
+  async function hangUp() {
+    const roomId = selectedAppointmentId;
+    if (socketRef.current && roomId) {
+      socketRef.current.emit("call:hangup", { roomId });
+    }
+    if (token && roomId) {
+      try {
+        await callService.end(token, roomId);
+      } catch {
+        // session may already be ended
+      }
+    }
+    cleanupMedia();
+    disconnectSocket();
+    setInCall(false);
+    setRemotePresent(false);
+    setCallStatus("Call ended");
+  }
+
+  function toggleMic() {
+    const track = localStreamRef.current?.getAudioTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setMicOn(track.enabled);
+  }
+
+  function toggleCam() {
+    const track = localStreamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    track.enabled = !track.enabled;
+    setCamOn(track.enabled);
+  }
+
+  const selected = confirmedAppointments.find(
+    (a) => a.id === selectedAppointmentId,
+  );
+  const peerLabel =
+    role === "DOCTOR"
+      ? selected?.patient?.user?.fullName ?? "Patient"
+      : selected?.doctor?.user?.fullName ?? "Doctor";
+
   return (
     <main className="mx-auto max-w-6xl p-6">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h1 className="text-3xl font-semibold tracking-tight">Call</h1>
-          <p className="text-sm text-zinc-600">
-            Basic WebRTC audio call with secure backend signaling.
+          <h1 className="text-3xl font-bold tracking-tight text-on-surface">Video call</h1>
+          <p className="text-sm text-on-surface-variant">
+            1:1 doctor–patient consultation with secure TURN relay.
           </p>
         </div>
-        <Badge tone="warning">MVP</Badge>
+        <Badge tone="success">Video</Badge>
       </div>
 
       {error && (
-        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>
+        <p className="mb-4 rounded-2xl bg-error/10 border border-error/20 p-3 text-sm text-error">
+          {error}
+        </p>
       )}
       {callError && (
-        <p className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <p className="mb-4 rounded-2xl bg-error/10 border border-error/20 p-3 text-sm text-error">
           {callError}
         </p>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-[360px,1fr]">
-        <Card className="space-y-4 p-4">
+      <div className="grid gap-6 lg:grid-cols-[320px,1fr]">
+        <Card className="space-y-4 rounded-2xl border-outline-variant p-4">
           <div className="space-y-1">
-            <h2 className="text-sm font-semibold text-zinc-900">
+            <h2 className="text-sm font-semibold text-on-surface">
               Eligible appointments
             </h2>
-            <p className="text-xs text-zinc-500">
-              Only `CONFIRMED` appointments can start a call.
+            <p className="text-xs text-on-surface-variant">
+              Only confirmed appointments can start a call. Doctor creates the
+              offer; patient answers.
             </p>
           </div>
 
-          {loading && <p className="text-sm text-zinc-500">Loading...</p>}
+          {loading && <p className="text-sm text-on-surface-variant">Loading…</p>}
           {!loading && confirmedAppointments.length === 0 && (
-            <p className="text-sm text-zinc-500">
+            <p className="text-sm text-on-surface-variant">
               No confirmed appointments yet.
             </p>
           )}
@@ -261,101 +443,118 @@ export default function CallPage() {
           {!loading &&
             confirmedAppointments.map((a) => {
               const title =
-                a.doctor?.user?.fullName ??
-                a.patient?.user?.fullName ??
-                "Appointment";
+                role === "DOCTOR"
+                  ? (a.patient?.user?.fullName ?? "Patient")
+                  : (a.doctor?.user?.fullName ?? "Doctor");
               const isSelected = a.id === selectedAppointmentId;
               return (
                 <button
                   key={a.id}
                   type="button"
+                  disabled={inCall}
                   onClick={() => setSelectedAppointmentId(a.id)}
-                  className={`w-full rounded-xl border p-3 text-left transition ${
+                  className={`w-full rounded-2xl border p-3 text-left transition ${
                     isSelected
-                      ? "border-zinc-900 bg-zinc-50"
-                      : "border-zinc-200 hover:bg-white"
-                  }`}
+                      ? "border-primary bg-primary-container/40"
+                      : "border-outline-variant hover:bg-surface-container-low"
+                  } disabled:opacity-60`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <p className="truncate text-sm font-medium text-zinc-900">
+                    <p className="truncate text-sm font-medium text-on-surface">
                       {title}
                     </p>
                     <Badge tone={isSelected ? "success" : "neutral"}>
                       CONFIRMED
                     </Badge>
                   </div>
-                  <p className="mt-1 text-xs text-zinc-500">
+                  <p className="mt-1 text-xs text-on-surface-variant">
                     {new Date(a.startAt).toLocaleString()}
                   </p>
                 </button>
               );
             })}
 
-          <div className="space-y-2">
-            <p className="text-sm font-semibold text-zinc-900">Mode</p>
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                variant={mode === "caller" ? "primary" : "secondary"}
-                onClick={() => setMode("caller")}
-              >
-                Caller
-              </Button>
-              <Button
-                variant={mode === "receiver" ? "primary" : "secondary"}
-                onClick={() => setMode("receiver")}
-              >
-                Receiver
-              </Button>
-            </div>
+          <div className="rounded-2xl border border-outline-variant bg-surface-container-low p-3 text-sm">
+            <p className="text-xs text-on-surface-variant">Status</p>
+            <p className="font-medium text-on-surface">{callStatus}</p>
+            {role && (
+              <p className="mt-1 text-xs text-on-surface-variant">
+                You are {role === "DOCTOR" ? "the doctor (offerer)" : "the patient"}
+              </p>
+            )}
           </div>
 
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm">
-            <p className="text-xs text-zinc-500">Status</p>
-            <p className="font-medium text-zinc-900">{callStatus}</p>
-          </div>
-
-          <Button
-            className="w-full"
-            disabled={!selectedAppointmentId || calling}
-            loading={calling}
-            onClick={() => void startCall()}
-          >
-            Start call
-          </Button>
+          {!inCall ? (
+            <Button
+              className="w-full"
+              disabled={!selectedAppointmentId || calling || !role}
+              loading={calling}
+              onClick={() => void startCall()}
+            >
+              Join video call
+            </Button>
+          ) : (
+            <Button
+              className="w-full"
+              variant="secondary"
+              onClick={() => void hangUp()}
+            >
+              End call
+            </Button>
+          )}
         </Card>
 
         <div className="space-y-4">
-          <Card className="p-4">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-900">Audio</h2>
-                <p className="text-xs text-zinc-500">
-                  Permission prompt may appear in your browser.
-                </p>
-              </div>
-              <Badge tone="neutral">STUN: Google</Badge>
+          <Card className="relative overflow-hidden rounded-2xl border-outline-variant bg-on-surface p-0">
+            <div className="relative aspect-video w-full bg-on-surface">
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="h-full w-full object-cover"
+              />
+              {!remotePresent && (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-white/50">
+                  Waiting for {peerLabel}…
+                </div>
+              )}
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute bottom-4 right-4 h-28 w-40 rounded-xl border border-white/20 object-cover shadow-lg"
+              />
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <div>
-                <p className="text-xs text-zinc-500">Local</p>
-                <audio ref={localAudioRef} autoPlay muted />
+            {inCall && (
+              <div className="flex items-center justify-center gap-3 border-t border-white/10 bg-on-surface px-4 py-3">
+                <button
+                  type="button"
+                  onClick={toggleMic}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                  aria-label={micOn ? "Mute" : "Unmute"}
+                >
+                  {micOn ? <Mic size={18} /> : <MicOff size={18} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={toggleCam}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-white/15 text-white hover:bg-white/25"
+                  aria-label={camOn ? "Turn camera off" : "Turn camera on"}
+                >
+                  {camOn ? <Video size={18} /> : <VideoOff size={18} />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void hangUp()}
+                  className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-error text-on-primary hover:opacity-90"
+                  aria-label="Hang up"
+                >
+                  <PhoneOff size={18} />
+                </button>
               </div>
-              <div>
-                <p className="text-xs text-zinc-500">Remote</p>
-                <audio ref={remoteAudioRef} autoPlay />
-              </div>
-            </div>
-          </Card>
-
-          <Card className="p-4">
-            <h2 className="text-sm font-semibold text-zinc-900">
-              How it works
-            </h2>
-            <p className="mt-2 text-sm text-zinc-600">
-              Caller creates an SDP offer and both peers exchange candidates via
-              Socket.IO rooms keyed by the appointment ID.
-            </p>
+            )}
           </Card>
         </div>
       </div>

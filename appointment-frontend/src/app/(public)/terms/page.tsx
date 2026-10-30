@@ -1,188 +1,160 @@
+import type { Metadata } from 'next';
+import Link from 'next/link';
+import { buildMetadata, JsonLd, breadcrumbSchema, SITE } from '@/lib/seo';
+import LegalDocumentLayout from '@/components/public/LegalDocumentLayout';
+
+export const metadata: Metadata = buildMetadata({
+  title: 'Terms of Service',
+  description:
+    'Review the PawCare Terms of Service. Understand your rights and responsibilities when booking vet care on our platform.',
+  path: '/terms',
+  keywords: ['terms of service', 'pawcare terms', 'vet platform legal'],
+});
+
+const BC = breadcrumbSchema([
+  { name: 'Home', url: SITE.url },
+  { name: 'Terms of Service', url: `${SITE.url}/terms` },
+]);
+
+const SECTIONS = [
+  {
+    id: 'acceptance',
+    title: '1. Acceptance of terms',
+    content: (
+      <>
+        <p>
+          By accessing or using PawCare, you agree to these Terms of Service and our{' '}
+          <Link href="/privacy" className="text-primary hover:underline">
+            Privacy Policy
+          </Link>
+          . If you do not agree, do not use the platform.
+        </p>
+        <p>
+          We may update these terms from time to time. Material changes will be communicated via email
+          or a notice on the platform. Continued use after changes constitutes acceptance.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'services',
+    title: '2. Our services',
+    content: (
+      <>
+        <p>
+          PawCare provides a technology platform that connects pet parents with independent licensed
+          veterinarians for online video consultations, instant consults, and in-clinic appointments.
+        </p>
+        <p>
+          PawCare does not provide veterinary medical services directly. Veterinarians on the platform are
+          independent professionals responsible for the care they deliver.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'responsibilities',
+    title: '3. User responsibilities',
+    content: (
+      <>
+        <p>As a user, you agree to:</p>
+        <ul className="list-disc pl-6 space-y-2">
+          <li>Provide accurate registration and pet health information.</li>
+          <li>Keep your account credentials secure and notify us of unauthorized access.</li>
+          <li>Use the platform only for lawful purposes related to pet care.</li>
+          <li>Attend scheduled appointments or cancel with reasonable notice.</li>
+          <li>Not misuse, scrape, or disrupt the platform or other users.</li>
+        </ul>
+      </>
+    ),
+  },
+  {
+    id: 'vet-disclaimer',
+    title: '4. Veterinary & emergency disclaimer',
+    content: (
+      <div className="rounded-xl border border-secondary/30 bg-secondary-container/40 p-5">
+        <p className="mb-3">
+          <strong>PawCare is not an emergency service.</strong> If your pet has life-threatening symptoms
+          — including difficulty breathing, severe bleeding, collapse, seizures, or suspected poisoning —
+          go to the nearest emergency veterinary clinic immediately.
+        </p>
+        <p>
+          Online consultations are not a substitute for hands-on examination when clinically required.
+          Veterinarians may recommend in-clinic visits based on your pet&apos;s condition. Advice provided
+          through PawCare is between you and your chosen veterinarian.
+        </p>
+      </div>
+    ),
+  },
+  {
+    id: 'payments',
+    title: '5. Payments & cancellations',
+    content: (
+      <>
+        <p>
+          Consultation fees are set by individual veterinarians and displayed before booking. Payment is
+          processed at the time of booking unless otherwise stated for in-clinic visits.
+        </p>
+        <p>
+          Cancellation and refund policies vary by veterinarian and are shown at checkout. Generally,
+          cancellations made at least 24 hours in advance qualify for a full refund. Late cancellations may
+          incur fees.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'privacy',
+    title: '6. Privacy & data',
+    content: (
+      <p>
+        Your use of PawCare is also governed by our{' '}
+        <Link href="/privacy" className="text-primary hover:underline">
+          Privacy Policy
+        </Link>{' '}
+        and{' '}
+        <Link href="/hipaa" className="text-primary hover:underline">
+          Data Protection
+        </Link>{' '}
+        page. We implement safeguards for pet health and personal information as described therein.
+      </p>
+    ),
+  },
+  {
+    id: 'liability',
+    title: '7. Limitation of liability',
+    content: (
+      <>
+        <p>
+          To the maximum extent permitted by law, PawCare is not liable for indirect, incidental, or
+          consequential damages arising from use of the platform or veterinary services provided by
+          independent veterinarians.
+        </p>
+        <p>
+          Our total liability for claims related to the platform is limited to the fees you paid to
+          PawCare in the twelve months preceding the claim.
+        </p>
+      </>
+    ),
+  },
+  {
+    id: 'governing-law',
+    title: '8. Governing law',
+    content: (
+      <p>
+        These Terms are governed by the laws of India. Disputes shall be subject to the exclusive
+        jurisdiction of courts in Bengaluru, Karnataka, unless otherwise required by applicable consumer
+        protection law.
+      </p>
+    ),
+  },
+];
+
 export default function TermsPage() {
   return (
     <>
-{/* Main Content */}
-      <main className="flex-grow pt-32 pb-24 px-8 max-w-[1024px] mx-auto w-full">
-        {/* Header Section */}
-        <div className="mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 bg-primary-container/10 text-primary-fixed-variant rounded-full text-label-xs mb-6 uppercase tracking-wider">
-            <span className="material-symbols-outlined text-[14px]">gavel</span>
-            Legal Information
-          </div>
-          <h1 className="font-display text-display text-on-surface mb-6">
-            Terms of Service
-          </h1>
-          <p className="font-body-lg text-body-lg text-on-surface-variant max-w-2xl">
-            Last updated: October 24, 2024. Please read these terms carefully
-            before using our platform.
-          </p>
-        </div>
-        {/* Content Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-12 relative">
-          {/* Table of Contents Sticky Sidebar */}
-          <aside className="hidden md:block md:col-span-4 lg:col-span-3">
-            <div className="sticky top-32">
-              <h3 className="font-label-sm text-label-sm text-on-surface-variant mb-4 uppercase tracking-wider">
-                Contents
-              </h3>
-              <nav className="flex flex-col gap-3">
-                <a
-                  className="font-body-md text-body-md text-primary font-medium border-l-2 border-primary pl-4 py-1 transition-colors"
-                  href="#acceptance"
-                >
-                  1. Acceptance of Terms
-                </a>
-                <a
-                  className="font-body-md text-body-md text-outline hover:text-on-surface border-l-2 border-surface-variant pl-4 py-1 transition-colors"
-                  href="#responsibilities"
-                >
-                  2. User Responsibilities
-                </a>
-                <a
-                  className="font-body-md text-body-md text-outline hover:text-on-surface border-l-2 border-surface-variant pl-4 py-1 transition-colors"
-                  href="#medical-disclaimer"
-                >
-                  3. Medical Disclaimer
-                </a>
-                <a
-                  className="font-body-md text-body-md text-outline hover:text-on-surface border-l-2 border-surface-variant pl-4 py-1 transition-colors"
-                  href="#privacy"
-                >
-                  4. Privacy &amp; Data Security
-                </a>
-                <a
-                  className="font-body-md text-body-md text-outline hover:text-on-surface border-l-2 border-surface-variant pl-4 py-1 transition-colors"
-                  href="#liability"
-                >
-                  5. Limitations of Liability
-                </a>
-                <a
-                  className="font-body-md text-body-md text-outline hover:text-on-surface border-l-2 border-surface-variant pl-4 py-1 transition-colors"
-                  href="#governing-law"
-                >
-                  6. Governing Law
-                </a>
-              </nav>
-            </div>
-          </aside>
-          {/* Main Document Content */}
-          <article className="md:col-span-8 lg:col-span-9 bg-surface-container-lowest rounded-xl border border-surface-variant p-8 md:p-12 shadow-sm relative z-10">
-            <section className="mb-12" id="acceptance">
-              <h2 className="font-h2 text-h2 text-on-surface mb-4 flex items-center gap-3">
-                <span className="bg-surface-container w-8 h-8 rounded-full flex items-center justify-center font-label-sm text-on-surface">
-                  1
-                </span>
-                Acceptance of Terms
-              </h2>
-              <div className="space-y-4 font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                <p>
-                  By accessing or using the Lumina Health platform, you agree to
-                  be bound by these Terms of Service and our Privacy Policy. If
-                  you do not agree to these terms, please do not use our
-                  services.
-                </p>
-                <p>
-                  We reserve the right to modify these terms at any time. We
-                  will notify users of any material changes via email or through
-                  a prominent notice on our platform.
-                </p>
-              </div>
-            </section>
-            <div className="w-full h-px bg-surface-variant my-8"></div>
-            <section className="mb-12" id="responsibilities">
-              <h2 className="font-h2 text-h2 text-on-surface mb-4 flex items-center gap-3">
-                <span className="bg-surface-container w-8 h-8 rounded-full flex items-center justify-center font-label-sm text-on-surface">
-                  2
-                </span>
-                User Responsibilities
-              </h2>
-              <div className="space-y-4 font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                <p>
-                  As a user of Lumina Health, you are responsible for
-                  maintaining the confidentiality of your account credentials
-                  and for all activities that occur under your account.
-                </p>
-                <ul className="list-disc pl-6 space-y-2 mt-4 text-on-surface-variant">
-                  <li>
-                    You must provide accurate, current, and complete information
-                    during registration.
-                  </li>
-                  <li>
-                    You agree not to use the service for any illegal or
-                    unauthorized purpose.
-                  </li>
-                  <li>
-                    You must not transmit any worms, viruses, or any code of a
-                    destructive nature.
-                  </li>
-                  <li>
-                    You are responsible for obtaining and maintaining all
-                    equipment needed to access the service.
-                  </li>
-                </ul>
-              </div>
-            </section>
-            <div className="w-full h-px bg-surface-variant my-8"></div>
-            <section className="mb-12" id="medical-disclaimer">
-              <div className="bg-secondary-container/30 border border-secondary-fixed-dim rounded-lg p-6 mb-6">
-                <h2 className="font-h3 text-h3 text-on-surface mb-3 flex items-center gap-2">
-                  <span className="material-symbols-outlined text-secondary">
-                    info
-                  </span>
-                  Medical Disclaimer
-                </h2>
-                <p className="font-body-md text-body-md text-on-surface-variant">
-                  The content provided through Lumina Health is for
-                  informational and organizational purposes only. It is not
-                  intended to be a substitute for professional medical advice,
-                  diagnosis, or treatment. Always seek the advice of your
-                  physician or other qualified health provider with any
-                  questions you may have regarding a medical condition.
-                </p>
-              </div>
-            </section>
-            <div className="w-full h-px bg-surface-variant my-8"></div>
-            <section className="mb-12" id="liability">
-              <h2 className="font-h2 text-h2 text-on-surface mb-4 flex items-center gap-3">
-                <span className="bg-surface-container w-8 h-8 rounded-full flex items-center justify-center font-label-sm text-on-surface">
-                  5
-                </span>
-                Limitations of Liability
-              </h2>
-              <div className="space-y-4 font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                <p>
-                  To the maximum extent permitted by applicable law, Lumina
-                  Health shall not be liable for any indirect, incidental,
-                  special, consequential, or punitive damages, or any loss of
-                  profits or revenues, whether incurred directly or indirectly.
-                </p>
-                <p>
-                  Our total liability for any claims under these terms,
-                  including for any implied warranties, is limited to the amount
-                  you paid us to use the services (or, if we choose, to
-                  supplying you the services again).
-                </p>
-              </div>
-            </section>
-            <div className="w-full h-px bg-surface-variant my-8"></div>
-            <section id="governing-law">
-              <h2 className="font-h2 text-h2 text-on-surface mb-4 flex items-center gap-3">
-                <span className="bg-surface-container w-8 h-8 rounded-full flex items-center justify-center font-label-sm text-on-surface">
-                  6
-                </span>
-                Governing Law
-              </h2>
-              <p className="font-body-md text-body-md text-on-surface-variant leading-relaxed">
-                These Terms shall be governed by and construed in accordance
-                with the laws of the State of Delaware, without regard to its
-                conflict of law provisions. Any legal action or proceeding
-                arising out of or relating to these Terms shall be instituted
-                exclusively in the federal or state courts located in Delaware.
-              </p>
-            </section>
-          </article>
-        </div>
-      </main>
+      <JsonLd schema={BC} />
+      <LegalDocumentLayout title="Terms of Service" lastUpdated="June 30, 2026" sections={SECTIONS} />
     </>
   );
 }

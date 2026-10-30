@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useCallback,
+} from "react";
+import { useSearchParams } from "next/navigation";
 import io, { Socket } from "socket.io-client";
 import { chatService } from "@/services/chat.service";
 import {
   Calendar,
+  CheckCheck,
   MessageSquare,
   MessagesSquare,
   Mic,
@@ -12,12 +21,14 @@ import {
   Paperclip,
   Phone,
   PhoneOff,
+  Search,
   SendHorizontal,
   ShieldCheck,
   User,
   Video,
   VideoOff,
 } from "lucide-react";
+import { getStoredToken } from "@/hooks/use-auth";
 
 type Message = {
   id: string;
@@ -66,8 +77,8 @@ function Avatar({ name, size = 40 }: { name: string; size?: number }) {
     .toUpperCase();
   const colors = [
     "bg-teal-100 text-teal-700",
-    "bg-blue-100 text-blue-700",
-    "bg-purple-100 text-purple-700",
+    "bg-primary-container text-primary",
+    "bg-tertiary-container text-on-tertiary-container",
     "bg-amber-100 text-amber-700",
   ];
   const color = colors[initials.charCodeAt(0) % colors.length];
@@ -99,6 +110,24 @@ function formatDate(iso: string) {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-[calc(100vh-64px)] items-center justify-center bg-surface">
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+        </div>
+      }
+    >
+      <ChatPageInner />
+    </Suspense>
+  );
+}
+
+function ChatPageInner() {
+  const searchParams = useSearchParams();
+  const deepLinkConversationId = searchParams.get("conversationId");
+  const deepLinkAppointmentId = searchParams.get("appointmentId");
+
   const [token, setToken] = useState<string | null>(null);
   // Start as false — becomes true once localStorage is read
   const [authChecked, setAuthChecked] = useState(false);
@@ -132,7 +161,7 @@ export default function ChatPage() {
 
   // ── Step 1: read localStorage — this is the only source of truth for auth ──
   useEffect(() => {
-    const t = window.localStorage.getItem("accessToken");
+    const t = getStoredToken();
     setToken(t);
     setAuthChecked(true);
     // If no token, nothing to load
@@ -240,15 +269,42 @@ export default function ChatPage() {
     };
   }, [callState]);
 
-  // ── Auto-select first conversation ──
+  // ── Auto-select conversation (deep-link or first) ──
   useEffect(() => {
     if (loading || conversations.length === 0) return;
     const hasSelected =
       selectedConvId &&
       conversations.some((c) => c.conversationId === selectedConvId);
     if (hasSelected) return;
+
+    if (deepLinkConversationId) {
+      const byConv = conversations.find(
+        (c) => c.conversationId === deepLinkConversationId,
+      );
+      if (byConv) {
+        setSelectedConvId(byConv.conversationId);
+        return;
+      }
+    }
+
+    if (deepLinkAppointmentId) {
+      const byAppt = conversations.find(
+        (c) => c.appointmentId === deepLinkAppointmentId,
+      );
+      if (byAppt) {
+        setSelectedConvId(byAppt.conversationId);
+        return;
+      }
+    }
+
     setSelectedConvId(conversations[0].conversationId);
-  }, [loading, conversations, selectedConvId]);
+  }, [
+    loading,
+    conversations,
+    selectedConvId,
+    deepLinkConversationId,
+    deepLinkAppointmentId,
+  ]);
 
   const filteredConvs = useMemo(
     () =>
@@ -357,21 +413,17 @@ export default function ChatPage() {
           : "ready";
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-[#f5faf8]">
+    <div className="flex h-[calc(100vh-64px)] overflow-hidden bg-surface">
       {/* ── Call Overlay ── */}
       {callState !== "idle" && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center gap-6">
+        <div className="fixed inset-0 z-50 bg-on-surface/90 flex flex-col items-center justify-center gap-6">
           {callType === "video" && callState === "in-call" && (
-            <div className="relative w-full max-w-4xl aspect-video bg-zinc-900 rounded-2xl overflow-hidden">
+            <div className="relative w-full max-w-4xl aspect-video bg-on-surface rounded-2xl overflow-hidden">
               <div className="absolute inset-0 flex items-center justify-center">
-                <span className="material-symbols-outlined text-7xl opacity-20 text-zinc-500">
-                  <Video />
-                </span>
+                <Video size={72} className="opacity-20 text-white/50" />
               </div>
-              <div className="absolute bottom-4 right-4 w-36 aspect-video bg-zinc-800 rounded-xl border-2 border-primary flex items-center justify-center">
-                <span className="material-symbols-outlined text-3xl text-zinc-500">
-                  <User />
-                </span>
+              <div className="absolute bottom-4 right-4 w-36 aspect-video bg-on-surface/80 rounded-xl border-2 border-primary flex items-center justify-center">
+                <User size={28} className="text-white/50" />
               </div>
             </div>
           )}
@@ -379,7 +431,7 @@ export default function ChatPage() {
             <div className="flex flex-col items-center gap-4">
               <Avatar name={otherName || "?"} size={96} />
               <h2 className="text-white text-2xl font-semibold">{otherName}</h2>
-              <p className="text-zinc-400 text-sm animate-pulse">
+              <p className="text-white/60 text-sm animate-pulse">
                 {callState === "calling"
                   ? callType === "video"
                     ? "Starting video call…"
@@ -389,7 +441,7 @@ export default function ChatPage() {
             </div>
           )}
           {callState === "in-call" && callType === "video" && (
-            <p className="text-zinc-400 text-sm">
+            <p className="text-white/60 text-sm">
               {formatDuration(callDuration)}
             </p>
           )}
@@ -397,28 +449,22 @@ export default function ChatPage() {
             {callType === "video" && (
               <button
                 onClick={() => setCamOff((v) => !v)}
-                className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${camOff ? "bg-red-500 text-white" : "bg-zinc-700 text-white hover:bg-zinc-600"}`}
+                className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${camOff ? "bg-error text-on-primary" : "bg-white/15 text-white hover:bg-white/25"}`}
               >
-                <span className="material-symbols-outlined text-[20px]">
-                  {camOff ? <VideoOff /> : <Video />}
-                </span>
+                {camOff ? <VideoOff size={20} /> : <Video size={20} />}
               </button>
             )}
             <button
               onClick={() => setMicMuted((v) => !v)}
-              className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${micMuted ? "bg-red-500 text-white" : "bg-zinc-700 text-white hover:bg-zinc-600"}`}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${micMuted ? "bg-error text-on-primary" : "bg-white/15 text-white hover:bg-white/25"}`}
             >
-              <span className="material-symbols-outlined text-[20px]">
-                {micMuted ? <MicOff /> : <Mic />}
-              </span>
+              {micMuted ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
             <button
               onClick={endCall}
-              className="w-14 h-14 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors shadow-lg"
+              className="w-14 h-14 rounded-full bg-error text-on-primary flex items-center justify-center hover:opacity-90 transition-colors shadow-lg"
             >
-              <span className="material-symbols-outlined text-[24px]">
-                <PhoneOff />
-              </span>
+              <PhoneOff size={24} />
             </button>
           </div>
         </div>
@@ -428,21 +474,22 @@ export default function ChatPage() {
       <aside className="w-80 lg:w-96 shrink-0 bg-white border-r border-outline-variant/40 flex flex-col">
         <div className="px-4 py-4 border-b border-outline-variant/40">
           <h2
-            className="font-semibold text-[18px] text-[#171d1c] mb-3"
+            className="font-semibold text-[18px] text-on-surface mb-3"
             style={{ fontFamily: "Manrope, sans-serif" }}
           >
             Messages
           </h2>
           <div className="relative">
-            <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-outline text-[18px]">
-              search
-            </span>
+            <Search
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-on-surface-variant"
+            />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search conversations…"
-              className="w-full pl-9 pr-3 py-2 bg-surface-container rounded-lg text-sm border-none focus:outline-none focus:ring-1 focus:ring-primary transition-all"
+              className="w-full pl-9 pr-3 py-2 bg-surface-container rounded-xl text-sm border border-transparent focus:outline-none focus:ring-1 focus:ring-primary focus:border-primary transition-all"
             />
           </div>
         </div>
@@ -500,8 +547,8 @@ export default function ChatPage() {
                       onClick={() => setSelectedConvId(c.conversationId)}
                       className={`w-full p-4 flex items-start gap-3 text-left transition-colors border-l-4 ${
                         isSelected
-                          ? "bg-[#f0f5f2] border-primary"
-                          : "border-transparent hover:bg-[#f0f5f2] cursor-pointer"
+                          ? "bg-surface-container-low border-primary"
+                          : "border-transparent hover:bg-surface-container-low cursor-pointer"
                       }`}
                     >
                       <div className="relative">
@@ -512,7 +559,7 @@ export default function ChatPage() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex justify-between items-baseline mb-0.5">
-                          <span className="text-sm font-semibold text-[#171d1c] truncate">
+                          <span className="text-sm font-semibold text-on-surface truncate">
                             {name}
                           </span>
                           <span className="text-[11px] text-outline ml-2 shrink-0">
@@ -523,7 +570,7 @@ export default function ChatPage() {
                           </span>
                         </div>
                         <div className="flex justify-between items-center gap-2">
-                          <span className="text-xs text-[#3d4947] truncate">
+                          <span className="text-xs text-on-surface-variant truncate">
                             {new Date(c.startAt).toLocaleString("en-US", {
                               month: "short",
                               day: "numeric",
@@ -532,7 +579,7 @@ export default function ChatPage() {
                             })}
                           </span>
                           <span
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 ${c.status === "CONFIRMED" ? "bg-primary text-white" : "bg-surface-container text-[#3d4947]"}`}
+                            className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold shrink-0 ${c.status === "CONFIRMED" ? "bg-primary text-white" : "bg-surface-container text-on-surface-variant"}`}
                           >
                             {c.status}
                           </span>
@@ -547,12 +594,12 @@ export default function ChatPage() {
       </aside>
 
       {/* ── Chat Window ── */}
-      <section className="flex-1 flex flex-col overflow-hidden bg-[#f5faf8]">
+      <section className="flex-1 flex flex-col overflow-hidden bg-surface">
         {!selectedConv ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-outline">
-            <span className="material-symbols-outlined text-7xl opacity-30">
-              <MessageSquare />
-            </span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-4 text-on-surface-variant">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-surface-container">
+              <MessageSquare size={28} className="opacity-60" />
+            </div>
             <p className="text-sm">Select a conversation to start chatting</p>
           </div>
         ) : (
@@ -564,19 +611,14 @@ export default function ChatPage() {
                 <div>
                   <div className="flex items-center gap-2">
                     <h2
-                      className="font-semibold text-[15px] text-[#171d1c]"
+                      className="font-semibold text-[15px] text-on-surface"
                       style={{ fontFamily: "Manrope, sans-serif" }}
                     >
                       {otherName}
                     </h2>
                     {me?.role === "PATIENT" && (
-                      <span className="bg-secondary-container text-secondary text-[10px] font-semibold px-2 py-0.5 rounded flex items-center gap-1">
-                        <span
-                          className="material-symbols-outlined text-[11px]"
-                          style={{ fontVariationSettings: "'FILL' 1" }}
-                        >
-                          <ShieldCheck />
-                        </span>
+                      <span className="bg-secondary-container text-secondary text-[10px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <ShieldCheck size={11} />
                         Verified Doctor
                       </span>
                     )}
@@ -598,46 +640,38 @@ export default function ChatPage() {
                 <button
                   onClick={() => startCall("audio")}
                   title="Audio Call"
-                  className="p-2 rounded-lg text-outline hover:bg-surface-container hover:text-[#171d1c] transition-colors"
+                  className="p-2 rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[22px]">
-                    <Phone />
-                  </span>
+                  <Phone size={20} />
                 </button>
                 <button
                   onClick={() => startCall("video")}
                   title="Video Call"
-                  className="p-2 rounded-lg text-outline hover:bg-surface-container hover:text-[#171d1c] transition-colors"
+                  className="p-2 rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[22px]">
-                    <Video />
-                  </span>
+                  <Video size={20} />
                 </button>
                 <div className="w-px h-5 bg-outline-variant mx-1" />
                 <a
                   href={`/appointments/${selectedConv.appointmentId}`}
-                  className="p-2 rounded-lg text-outline hover:bg-surface-container hover:text-[#171d1c] transition-colors"
+                  className="p-2 rounded-xl text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
                   title="View Appointment"
                 >
-                  <span className="material-symbols-outlined text-[22px]">
-                    <Calendar />
-                  </span>
+                  <Calendar size={20} />
                 </a>
               </div>
             </header>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4 bg-[#f5faf8]">
+            <div className="flex-1 overflow-y-auto px-6 py-4 flex flex-col gap-4 bg-surface">
               {messagesLoading && (
                 <div className="flex justify-center py-8">
                   <div className="h-6 w-6 animate-spin rounded-full border-4 border-primary border-t-transparent" />
                 </div>
               )}
               {!messagesLoading && messages.length === 0 && (
-                <div className="flex flex-col items-center justify-center flex-1 gap-2 text-outline">
-                  <span className="material-symbols-outlined text-5xl opacity-30">
-                    <MessagesSquare />
-                  </span>
+                <div className="flex flex-col items-center justify-center flex-1 gap-2 text-on-surface-variant">
+                  <MessagesSquare size={40} className="opacity-40" />
                   <p className="text-sm">No messages yet. Say hello!</p>
                 </div>
               )}
@@ -664,7 +698,7 @@ export default function ChatPage() {
                           )}
                           <div className="flex flex-col gap-0.5">
                             <div
-                              className={`px-4 py-2.5 rounded-2xl shadow-sm text-sm leading-relaxed ${isMine ? "bg-primary-container text-on-primary-container rounded-br-none" : "bg-white border border-border-surface-container-highest text-[#171d1c] rounded-bl-none"}`}
+                              className={`px-4 py-2.5 rounded-2xl shadow-sm text-sm leading-relaxed ${isMine ? "bg-primary-container text-on-primary-container rounded-br-none" : "bg-white border border-surface-container-highest text-on-surface rounded-bl-none"}`}
                             >
                               {msg.body}
                             </div>
@@ -675,9 +709,7 @@ export default function ChatPage() {
                                 {formatTime(msg.createdAt)}
                               </span>
                               {isMine && (
-                                <span className="material-symbols-outlined text-[13px] text-primary">
-                                  done_all
-                                </span>
+                                <CheckCheck size={13} className="text-primary" />
                               )}
                             </div>
                           </div>
@@ -705,14 +737,12 @@ export default function ChatPage() {
 
             {/* Input */}
             <div className="bg-white border-t border-outline-variant/40 px-4 py-3">
-              <div className="flex items-end gap-2 bg-[#f5faf8] border border-outline-variant rounded-xl px-2 py-1 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all">
+              <div className="flex items-end gap-2 bg-surface border border-outline-variant rounded-xl px-2 py-1 focus-within:border-primary focus-within:ring-1 focus-within:ring-primary transition-all">
                 <button
-                  className="p-2 text-outline hover:text-primary transition-colors shrink-0"
+                  className="p-2 text-on-surface-variant hover:text-primary transition-colors shrink-0"
                   title="Attach"
                 >
-                  <span className="material-symbols-outlined text-[20px]">
-                    <Paperclip />
-                  </span>
+                  <Paperclip size={18} />
                 </button>
                 <textarea
                   ref={textareaRef}
@@ -725,23 +755,18 @@ export default function ChatPage() {
                   placeholder="Type your message… (Enter to send)"
                   rows={1}
                   maxLength={2000}
-                  className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 resize-none text-sm text-[#171d1c] placeholder:text-outline py-2.5 min-h-[40px] max-h-32"
+                  className="flex-1 bg-transparent border-none focus:outline-none focus:ring-0 resize-none text-sm text-on-surface placeholder:text-outline py-2.5 min-h-[40px] max-h-32"
                 />
                 <button
                   onClick={sendMessage}
                   disabled={!sendText.trim() || sending}
                   title="Send"
-                  className="p-2 bg-primary text-white rounded-lg hover:bg-[#005049] transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                  className="p-2 bg-primary text-on-primary rounded-lg hover:bg-primary-hover transition-colors shrink-0 disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
                 >
                   {sending ? (
                     <div className="w-5 h-5 animate-spin rounded-full border-2 border-white border-t-transparent" />
                   ) : (
-                    <span
-                      className="material-symbols-outlined text-[20px]"
-                      style={{ fontVariationSettings: "'FILL' 1" }}
-                    >
-                      <SendHorizontal />
-                    </span>
+                    <SendHorizontal size={18} />
                   )}
                 </button>
               </div>
