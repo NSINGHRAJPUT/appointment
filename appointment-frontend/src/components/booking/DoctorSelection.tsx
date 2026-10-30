@@ -1,55 +1,108 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../ui/button';
-import { Card } from '../ui/card';
 import { Avatar } from '../ui/avatar';
+import { Loader2 } from 'lucide-react';
+import { doctorService } from '@/services/doctor.service';
 
-// Dummy data for doctors
-const MOCK_DOCTORS = [
-  { id: '1', name: 'Dr. Sarah Smith', specialization: 'General Physician', available: true },
-  { id: '2', name: 'Dr. John Doe', specialization: 'Cardiologist', available: true },
-  { id: '3', name: 'Dr. Emily Chen', specialization: 'Dermatologist', available: false },
-];
+type DoctorListItem = {
+  id: string;
+  specialization: string | null;
+  priceCents: number;
+  photoUrl?: string | null;
+  user: { fullName: string };
+};
 
-export function DoctorSelection({ onSelect }: { onSelect: (doctorId: string) => void }) {
+function fmtPrice(cents: number) {
+  return cents === 0 ? 'Free' : `₹${(cents / 100).toFixed(0)}`;
+}
+
+export function DoctorSelection({
+  onSelect,
+}: {
+  onSelect: (doctorId: string) => void;
+}) {
+  const [doctors, setDoctors] = useState<DoctorListItem[]>([]);
+  const [loading, setLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [error, setError] = useState('');
 
-  const handleContinue = () => {
-    if (selectedId) {
-      onSelect(selectedId);
-    }
-  };
+  useEffect(() => {
+    const params = new URLSearchParams({ limit: '12', page: '1' });
+    doctorService
+      .list(params)
+      .then((data) => {
+        const list = data as { items?: DoctorListItem[] };
+        setDoctors(list.items ?? []);
+      })
+      .catch(() => {
+        setError('Failed to load veterinarians. Please try again.');
+        setDoctors([]);
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12 text-on-surface-variant">
+        <Loader2 className="w-5 h-5 animate-spin mr-2" />
+        Loading veterinarians...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
-      <div className="text-sm text-zinc-500 mb-4">
-        Select a doctor from our recommendations or choose the best available.
-      </div>
-      
-      <div className="space-y-3">
-        {MOCK_DOCTORS.map((doctor) => (
-          <div 
-            key={doctor.id} 
-            className={`p-3 rounded-lg border cursor-pointer transition-colors ${selectedId === doctor.id ? 'border-blue-500 bg-blue-50' : 'border-zinc-200 hover:border-blue-300'}`}
-            onClick={() => doctor.available && setSelectedId(doctor.id)}
-          >
-            <div className="flex items-center gap-3">
-              <Avatar src="" name={doctor.name.charAt(4)} alt={doctor.name} />
-              <div className="flex-1">
-                <div className="font-medium text-zinc-900 flex items-center gap-2">
-                  {doctor.name}
-                  {!doctor.available && <span className="text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded">Offline</span>}
-                </div>
-                <div className="text-xs text-zinc-500">{doctor.specialization}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+      <p className="text-sm text-on-surface-variant">
+        Select a demo veterinarian to book your appointment.
+      </p>
 
-      <div className="pt-4 flex justify-end">
-        <Button onClick={handleContinue} disabled={!selectedId}>
+      {error && (
+        <div className="rounded-xl border border-error/25 bg-error-container/50 p-3 text-sm text-on-error-container">
+          {error}
+        </div>
+      )}
+
+      {doctors.length === 0 && !error ? (
+        <p className="py-6 text-center text-sm text-on-surface-variant">
+          No veterinarians available right now.
+        </p>
+      ) : (
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {doctors.map((doctor) => (
+            <button
+              key={doctor.id}
+              type="button"
+              className={`flex w-full items-center gap-3 rounded-xl border p-3 text-left transition-colors ${
+                selectedId === doctor.id
+                  ? 'border-primary bg-primary-container'
+                  : 'border-outline-variant hover:border-primary/50'
+              }`}
+              onClick={() => setSelectedId(doctor.id)}
+            >
+              <Avatar
+                src={doctor.photoUrl}
+                name={doctor.user.fullName}
+                alt={doctor.user.fullName}
+                size={40}
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-on-surface">
+                  {doctor.user.fullName}
+                </div>
+                <div className="text-xs text-on-surface-variant">
+                  {doctor.specialization ?? 'General Practice'} ·{' '}
+                  {fmtPrice(doctor.priceCents)}
+                </div>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="flex justify-end pt-2">
+        <Button onClick={() => selectedId && onSelect(selectedId)} disabled={!selectedId}>
           Continue
         </Button>
       </div>

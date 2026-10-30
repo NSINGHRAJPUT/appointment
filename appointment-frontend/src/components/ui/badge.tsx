@@ -6,16 +6,17 @@ export function Badge({
   tone = 'neutral',
 }: {
   children: ReactNode;
-  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'destructive';
+  tone?: 'neutral' | 'success' | 'warning' | 'danger' | 'destructive' | 'primary';
 }) {
   return (
     <span
       className={clsx(
-        'inline-flex rounded-full px-2.5 py-1 text-xs font-medium',
-        tone === 'neutral' && 'bg-zinc-100 text-zinc-700',
-        tone === 'success' && 'bg-emerald-100 text-emerald-700',
-        tone === 'warning' && 'bg-amber-100 text-amber-700',
-        tone === 'danger' && 'bg-red-100 text-red-700',
+        'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium',
+        tone === 'neutral' && 'bg-surface-container text-on-surface-variant',
+        tone === 'primary' && 'bg-primary-container text-on-primary-container',
+        tone === 'success' && 'bg-primary-container text-primary',
+        tone === 'warning' && 'bg-amber-100 text-amber-800',
+        (tone === 'danger' || tone === 'destructive') && 'bg-error-container text-on-error-container',
       )}
     >
       {children}

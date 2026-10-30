@@ -18,10 +18,10 @@ export function DoctorVerificationTable() {
   };
 
   return (
-    <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
+    <div className="bg-white border border-outline-variant rounded-2xl overflow-hidden">
       <div className="overflow-x-auto">
         <table className="w-full text-sm text-left">
-          <thead className="bg-zinc-50 border-b border-zinc-200 text-zinc-500 font-medium">
+          <thead className="bg-surface-container-low border-b border-outline-variant text-on-surface-variant font-medium">
             <tr>
               <th className="px-6 py-4">Doctor</th>
               <th className="px-6 py-4">Submitted</th>
@@ -29,14 +29,14 @@ export function DoctorVerificationTable() {
               <th className="px-6 py-4 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-zinc-100">
+          <tbody className="divide-y divide-outline-variant">
             {doctors.map(doctor => (
-              <tr key={doctor.id} className="hover:bg-zinc-50/50">
+              <tr key={doctor.id} className="hover:bg-surface-container-low/60">
                 <td className="px-6 py-4">
-                  <div className="font-medium text-zinc-900">{doctor.name}</div>
-                  <div className="text-zinc-500">{doctor.email}</div>
+                  <div className="font-medium text-on-surface">{doctor.name}</div>
+                  <div className="text-on-surface-variant">{doctor.email}</div>
                 </td>
-                <td className="px-6 py-4 text-zinc-500">{doctor.submitted}</td>
+                <td className="px-6 py-4 text-on-surface-variant">{doctor.submitted}</td>
                 <td className="px-6 py-4">
                   <Badge tone={doctor.status === 'APPROVED' ? 'success' : doctor.status === 'REJECTED' ? 'destructive' : 'warning'}>
                     {doctor.status}
@@ -45,10 +45,10 @@ export function DoctorVerificationTable() {
                 <td className="px-6 py-4 text-right">
                   {doctor.status === 'PENDING' ? (
                     <div className="flex justify-end gap-2">
-                      <Button size="sm" variant="outline" className="text-green-600 border-green-600 hover:bg-green-50" onClick={() => handleAction(doctor.id, 'APPROVED')}>
+                      <Button size="sm" variant="outline" className="text-primary border-primary hover:bg-primary-container" onClick={() => handleAction(doctor.id, 'APPROVED')}>
                         Approve
                       </Button>
-                      <Button size="sm" variant="outline" className="text-red-600 border-red-600 hover:bg-red-50" onClick={() => handleAction(doctor.id, 'REJECTED')}>
+                      <Button size="sm" variant="outline" className="text-error border-error/40 hover:bg-error/5" onClick={() => handleAction(doctor.id, 'REJECTED')}>
                         Reject
                       </Button>
                     </div>

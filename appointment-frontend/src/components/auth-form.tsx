@@ -8,8 +8,6 @@ import {
   Mail,
   Lock,
   Stethoscope,
-  MapPin,
-  Clock,
   Upload,
   Phone,
   CheckCircle,
@@ -23,6 +21,11 @@ import {
   FileText,
   Calendar,
 } from "lucide-react";
+import {
+  patientRegisterSchema,
+  doctorRegisterSchema,
+  formatZodError,
+} from "@/lib/validation/schemas";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -79,33 +82,33 @@ const DAYS = [
 ];
 
 const SPECIALTIES = [
-  "Cardiology",
+  "General Practice",
+  "Surgery",
   "Dermatology",
+  "Dentistry",
+  "Emergency Care",
+  "Nutrition",
+  "Behavior",
+  "Exotic Pets",
+  "Cardiology",
   "Neurology",
-  "Pediatrics",
-  "Orthopedics",
-  "Psychiatry",
   "Ophthalmology",
-  "ENT",
-  "Oncology",
-  "Endocrinology",
-  "Gastroenterology",
-  "Urology",
+  "Orthopedics",
 ];
 
 const CONDITIONS = [
-  "Hypertension",
-  "Diabetes",
-  "Asthma",
+  "Vaccinations",
+  "Skin Allergies",
+  "Dental Disease",
   "Arthritis",
-  "Depression",
+  "Digestive Issues",
   "Anxiety",
-  "Migraine",
-  "Back Pain",
-  "Heart Disease",
-  "Thyroid Disorders",
-  "Kidney Disease",
-  "Allergies",
+  "Parasite Control",
+  "Weight Management",
+  "Ear Infections",
+  "Orthopedic Injury",
+  "Chronic Illness",
+  "Preventive Care",
 ];
 
 const STEPS = [
@@ -272,7 +275,7 @@ function Step1({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="text-lg font-bold text-on-surface">Basic Information</h3>
+        <h3 className="font-display text-lg font-bold text-on-surface">Basic Information</h3>
         <p className="text-sm text-on-surface-variant mt-0.5">
           Tell us about yourself to get started.
         </p>
@@ -304,6 +307,7 @@ function Step1({
             value={form.phone}
             onChange={(e) => set("phone", e.target.value)}
             placeholder="+1 234 567 8900"
+            required
           />
         </Field>
         <Field label="Gender">
@@ -336,14 +340,14 @@ function Step2({
           Professional Details
         </h3>
         <p className="text-sm text-on-surface-variant mt-0.5">
-          Your medical credentials and background.
+          Your veterinary credentials and background.
         </p>
       </div>
-      <Field label="Medical License Number">
+      <Field label="Veterinary License Number">
         <TextInput
           value={form.licenseNumber}
           onChange={(e) => set("licenseNumber", e.target.value)}
-          placeholder="LIC-12345678"
+          placeholder="VET-12345678"
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -372,19 +376,18 @@ function Step2({
           onChange={(e) => set("degree", e.target.value)}
         >
           <option value="">Select degree</option>
-          <option>MBBS</option>
-          <option>MD</option>
-          <option>MS</option>
-          <option>DM</option>
-          <option>MCh</option>
+          <option>DVM</option>
+          <option>BVSc</option>
+          <option>MVSc</option>
           <option>PhD</option>
+          <option>Diploma</option>
         </SelectInput>
       </Field>
-      <Field label="University / Medical School">
+      <Field label="University / Veterinary School">
         <TextInput
           value={form.university}
           onChange={(e) => set("university", e.target.value)}
-          placeholder="Harvard Medical School"
+          placeholder="College of Veterinary Medicine"
         />
       </Field>
     </div>
@@ -458,14 +461,14 @@ function Step4({
         <TextInput
           value={form.clinicName}
           onChange={(e) => set("clinicName", e.target.value)}
-          placeholder="City Heart Hospital"
+          placeholder="Paws & Claws Veterinary Clinic"
         />
       </Field>
       <Field label="Clinic Address">
         <TextInput
           value={form.clinicAddress}
           onChange={(e) => set("clinicAddress", e.target.value)}
-          placeholder="123 Medical Plaza, Suite 4B"
+          placeholder="123 Pet Care Lane, Suite 4B"
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
@@ -597,7 +600,7 @@ function Step5({
       </button>
       {form.slots.length === 0 && (
         <p className="text-xs text-on-surface-variant text-center py-2">
-          Add at least one availability slot.
+          Add at least one availability slot, or skip if you'll manage availability later.
         </p>
       )}
     </div>
@@ -612,23 +615,81 @@ function Step6({
   set: (k: keyof DoctorForm, v: any) => void;
 }) {
   const ref = useRef<HTMLInputElement>(null);
+  const [fileErrors, setFileErrors] = useState<{ [key: number]: string }>({});
+
+  // File validation constants
+  const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+  const MAX_FILES = 5;
+  const ALLOWED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
+  const ALLOWED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png"];
+
+  // Validate individual file
+  const validateFile = (file: File): string | null => {
+    // Check file type
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      return "Only PDF, JPG, and PNG files are allowed";
+    }
+
+    // Check file size
+    if (file.size > MAX_FILE_SIZE) {
+      return "File size must not exceed 5MB";
+    }
+
+    return null;
+  };
+
+  // Handle file selection with validation
   const handleFiles = (files: FileList | null) => {
     if (!files) return;
-    set("documents", [...form.documents, ...Array.from(files)]);
+
+    const newErrors: { [key: number]: string } = {};
+    const validFiles: File[] = [];
+    const currentCount = form.documents.length;
+
+    Array.from(files).forEach((file, index) => {
+      // Check total file count
+      if (currentCount + validFiles.length >= MAX_FILES) {
+        newErrors[index] = `Maximum ${MAX_FILES} files allowed per upload`;
+        return;
+      }
+
+      // Validate file
+      const error = validateFile(file);
+      if (error) {
+        newErrors[index] = error;
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    // Update errors and add valid files
+    setFileErrors(newErrors);
+    if (validFiles.length > 0) {
+      set("documents", [...form.documents, ...validFiles]);
+    }
   };
-  const removeDoc = (i: number) =>
+
+  const removeDoc = (i: number) => {
     set(
       "documents",
       form.documents.filter((_, idx) => idx !== i),
     );
+    // Clear error for this index if it exists
+    const newErrors = { ...fileErrors };
+    delete newErrors[i];
+    setFileErrors(newErrors);
+  };
+
   return (
     <div className="space-y-4">
       <div>
         <h3 className="text-lg font-bold text-on-surface">Documents Upload</h3>
         <p className="text-sm text-on-surface-variant mt-0.5">
-          Upload your medical license, degree certificates, and ID proof.
+          Upload your veterinary license, degree certificates, and ID proof.
         </p>
       </div>
+
+      {/* Drag and drop area */}
       <div
         onClick={() => ref.current?.click()}
         onDragOver={(e) => e.preventDefault()}
@@ -647,51 +708,82 @@ function Step6({
         </p>
         <p className="text-xs text-on-surface-variant mt-1">
           or <span className="text-primary underline">browse files</span> — PDF,
-          JPG, PNG up to 10 MB each
+          JPG, PNG up to 5 MB each
+        </p>
+        <p className="text-xs text-on-surface-variant mt-2">
+          {form.documents.length}/{MAX_FILES} files selected
         </p>
         <input
           ref={ref}
           type="file"
           multiple
-          accept=".pdf,.jpg,.jpeg,.png"
+          accept={ALLOWED_EXTENSIONS.join(",")}
           className="hidden"
           onChange={(e) => handleFiles(e.target.files)}
         />
       </div>
+
+      {/* File validation errors */}
+      {Object.keys(fileErrors).length > 0 && (
+        <div className="space-y-2">
+          {Object.entries(fileErrors).map(([index, error]) => (
+            <div
+              key={index}
+              className="flex items-center gap-2 rounded-xl bg-error/10 border border-error/20 px-4 py-3 text-sm text-error"
+            >
+              <X size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Uploaded files list */}
       {form.documents.length > 0 && (
         <div className="space-y-2">
+          <p className="text-xs font-semibold text-on-surface-variant uppercase tracking-wider">
+            Uploaded Files ({form.documents.length}/{MAX_FILES})
+          </p>
           {form.documents.map((file, i) => (
             <div
               key={i}
-              className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant bg-surface-container"
+              className="flex items-center gap-3 p-3 rounded-xl border border-outline-variant bg-surface-container hover:bg-surface-container/80 transition-colors"
             >
               <FileText size={16} className="text-primary shrink-0" />
-              <span className="text-sm text-on-surface flex-1 truncate">
-                {file.name}
-              </span>
-              <span className="text-xs text-on-surface-variant">
-                {(file.size / 1024).toFixed(0)} KB
-              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-on-surface truncate font-medium">
+                  {file.name}
+                </p>
+                <p className="text-xs text-on-surface-variant">
+                  {(file.size / 1024).toFixed(1)} KB
+                </p>
+              </div>
               <button
                 type="button"
                 onClick={() => removeDoc(i)}
-                className="text-on-surface-variant hover:text-error transition-colors"
+                className="text-on-surface-variant hover:text-error transition-colors shrink-0 p-1"
+                title="Remove file"
               >
-                <X size={14} />
+                <X size={16} />
               </button>
             </div>
           ))}
         </div>
       )}
+
+      {/* Info box */}
       <div className="bg-surface-tint/10 rounded-xl p-4">
-        <p className="text-xs font-semibold text-on-surface mb-1">
+        <p className="text-xs font-semibold text-on-surface mb-2">
           Required Documents
         </p>
-        <ul className="text-xs text-on-surface-variant space-y-0.5">
-          <li>• Valid medical license / registration certificate</li>
-          <li>• Highest degree certificate (MD, MBBS, etc.)</li>
+        <ul className="text-xs text-on-surface-variant space-y-0.5 mb-3">
+          <li>• Valid veterinary license / registration certificate</li>
+          <li>• Highest degree certificate (DVM, BVSc, etc.)</li>
           <li>• Government-issued ID (passport or national ID)</li>
         </ul>
+        <p className="text-xs text-on-surface-variant">
+          <span className="font-medium">File requirements:</span> PDF, JPG, or PNG format. Maximum 5MB per file. Up to 5 files total.
+        </p>
       </div>
     </div>
   );
@@ -749,11 +841,11 @@ function Step7({
           </div>
         </div>
       </label>
-      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
-        <p className="text-xs font-semibold text-emerald-800 mb-1">
+      <div className="bg-primary-container border border-primary/20 rounded-xl p-4">
+        <p className="text-xs font-semibold text-primary mb-1">
           Why add WhatsApp?
         </p>
-        <p className="text-xs text-emerald-700">
+        <p className="text-xs text-on-surface-variant">
           Patients can send quick questions, follow-ups, or appointment
           reminders directly — leading to higher satisfaction and fewer
           no-shows.
@@ -833,6 +925,8 @@ function PatientRegister({
   setFullName,
   email,
   setEmail,
+  phone,
+  setPhone,
   password,
   setPassword,
 }: {
@@ -843,6 +937,8 @@ function PatientRegister({
   setFullName: (v: string) => void;
   email: string;
   setEmail: (v: string) => void;
+  phone: string;
+  setPhone: (v: string) => void;
   password: string;
   setPassword: (v: string) => void;
 }) {
@@ -877,6 +973,24 @@ function PatientRegister({
             placeholder="patient@example.com"
             className={inputCls}
             style={{ paddingLeft: "2.5rem" }}
+            required
+          />
+        </div>
+      </Field>
+      <Field label="Phone Number">
+        <div className="relative">
+          <Phone
+            size={15}
+            className="absolute left-3.5 top-1/2 -translate-y-1/2 text-on-surface-variant"
+          />
+          <input
+            type="tel"
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+1 234 567 8900"
+            className={inputCls}
+            style={{ paddingLeft: "2.5rem" }}
+            required
           />
         </div>
       </Field>
@@ -887,7 +1001,7 @@ function PatientRegister({
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
+        className="w-full py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
       >
         {loading ? "Creating account…" : "Create Patient Account"}
       </button>
@@ -904,6 +1018,24 @@ function ErrorBox({ children }: { children: React.ReactNode }) {
       {children}
     </div>
   );
+}
+
+function resolvePostAuthRedirect(): string {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const returnUrl = params.get("returnUrl");
+    if (
+      returnUrl &&
+      returnUrl.startsWith("/") &&
+      !returnUrl.startsWith("//") &&
+      !returnUrl.includes("://")
+    ) {
+      return returnUrl;
+    }
+  } catch {
+    /* ignore */
+  }
+  return "/dashboard";
 }
 
 // ─── Main AuthForm ────────────────────────────────────────────────────────────
@@ -923,6 +1055,7 @@ export function AuthForm() {
   const [patientEmail, setPatientEmail] = useState("");
   const [patientPassword, setPatientPassword] = useState("");
   const [patientName, setPatientName] = useState("");
+  const [patientPhone, setPatientPhone] = useState("");
 
   // Doctor multi-step state
   const [step, setStep] = useState(0);
@@ -946,7 +1079,7 @@ export function AuthForm() {
     country: "",
     consultationFee: "",
     onlineConsultation: false,
-    slots: [{ day: "Monday", from: "09:00", to: "17:00" }],
+    slots: [],
     documents: [],
     whatsapp: "",
     whatsappOptOut: false,
@@ -965,7 +1098,7 @@ export function AuthForm() {
         password: loginPassword,
       });
       saveToken(res.accessToken);
-      window.location.href = "/dashboard";
+      window.location.href = resolvePostAuthRedirect();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -976,17 +1109,27 @@ export function AuthForm() {
   const handlePatientRegister = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    const parsed = patientRegisterSchema.safeParse({
+      fullName: patientName,
+      email: patientEmail,
+      password: patientPassword,
+      phone: patientPhone,
+    });
+    if (!parsed.success) {
+      setError(formatZodError(parsed.error));
+      return;
+    }
     setLoading(true);
     try {
-      console.log('patient details:::::', {email: patientEmail, password: patientPassword, fullName: patientName});
       const res = await authService.register({
-        email: patientEmail,
-        password: patientPassword,
-        fullName: patientName,
+        email: parsed.data.email,
+        password: parsed.data.password,
+        fullName: parsed.data.fullName,
+        phone: parsed.data.phone,
         role: "PATIENT",
       });
       saveToken(res.accessToken);
-      window.location.href = "/dashboard";
+      window.location.href = resolvePostAuthRedirect();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -996,11 +1139,29 @@ export function AuthForm() {
 
   const handleDoctorSubmit = async () => {
     setError(null);
+    const parsed = doctorRegisterSchema.safeParse({
+      fullName: doctorForm.fullName,
+      email: doctorForm.email,
+      password: doctorForm.password,
+      phone: doctorForm.phone,
+      specialization: doctorForm.primarySpecialty,
+      clinicName: doctorForm.clinicName,
+      licenseNumber: doctorForm.licenseNumber,
+    });
+    if (!parsed.success) {
+      setError(formatZodError(parsed.error));
+      return;
+    }
     setLoading(true);
     try {
-      const res = await authService.register({ role: "DOCTOR", ...doctorForm });
+      const res = await authService.register(
+        { role: "DOCTOR", ...doctorForm },
+        (progress) => {
+          void progress;
+        }
+      );
       saveToken(res.accessToken);
-      window.location.href = "/dashboard";
+      window.location.href = resolvePostAuthRedirect();
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -1020,19 +1181,7 @@ export function AuthForm() {
   ];
 
   return (
-    <div className="min-h-screen bg-surface flex items-center justify-center p-4">
-      <div className="w-full">
-        {/* Brand mark */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-primary text-on-primary mb-3">
-            <Stethoscope size={22} />
-          </div>
-          <h1 className="text-2xl font-bold text-on-surface">Lumina Health</h1>
-          <p className="text-sm text-on-surface-variant mt-0.5">
-            Healthcare made accessible
-          </p>
-        </div>
-
+    <div className="w-full">
         <div className="bg-surface-container-lowest border border-outline-variant rounded-3xl shadow-lg overflow-hidden">
           {/* Mode tabs */}
           <div className="flex border-b border-outline-variant">
@@ -1044,6 +1193,7 @@ export function AuthForm() {
                   setMode(m);
                   setStep(0);
                   setError(null);
+                  if (m === "register") setRole("PATIENT");
                 }}
                 className={`flex-1 py-4 text-sm font-semibold capitalize transition-colors ${mode === m ? "text-primary border-b-2 border-primary bg-primary/5" : "text-on-surface-variant hover:bg-surface-container"}`}
               >
@@ -1057,11 +1207,11 @@ export function AuthForm() {
             {mode === "login" && (
               <form onSubmit={handleLogin} className="space-y-4">
                 <div className="mb-2">
-                  <h2 className="text-lg font-bold text-on-surface">
+                  <h2 className="font-display text-lg font-bold text-on-surface">
                     Welcome back
                   </h2>
                   <p className="text-sm text-on-surface-variant">
-                    Sign in to your account
+                    Sign in to your PawCare account
                   </p>
                 </div>
                 <Field label="Email">
@@ -1098,7 +1248,7 @@ export function AuthForm() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
+                  className="w-full py-3 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
                 >
                   {loading ? "Signing in…" : "Sign In"}
                 </button>
@@ -1164,6 +1314,8 @@ export function AuthForm() {
                     setFullName={setPatientName}
                     email={patientEmail}
                     setEmail={setPatientEmail}
+                    phone={patientPhone}
+                    setPhone={setPatientPhone}
                     password={patientPassword}
                     setPassword={setPatientPassword}
                   />
@@ -1197,7 +1349,7 @@ export function AuthForm() {
                             : handleDoctorSubmit
                         }
                         disabled={loading}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-full bg-primary text-on-primary text-sm font-semibold hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-60"
                       >
                         {step < STEPS.length - 1 ? (
                           <>
@@ -1233,7 +1385,6 @@ export function AuthForm() {
           </a>
           .
         </p>
-      </div>
     </div>
   );
 }

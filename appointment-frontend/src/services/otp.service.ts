@@ -1,10 +1,18 @@
 import { apiFetch } from '@/lib/api';
 
 export const otpService = {
-  send: (target: string, type: 'PHONE' | 'EMAIL') =>
+  send: (
+    target: string,
+    type: 'PHONE' | 'EMAIL',
+    alsoNotifyEmail?: string,
+  ) =>
     apiFetch<{ message: string }>('/otp/send', {
       method: 'POST',
-      body: JSON.stringify({ target, type }),
+      body: JSON.stringify({
+        target,
+        type,
+        ...(alsoNotifyEmail ? { alsoNotifyEmail } : {}),
+      }),
     }),
 
   verify: (target: string, type: 'PHONE' | 'EMAIL', code: string) =>
